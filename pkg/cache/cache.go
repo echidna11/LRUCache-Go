@@ -13,99 +13,109 @@ func NewNode[T comparable, V any](key T, val V) *Node[T, V] {
 	return &Node[T, V]{value: val, key: key}
 } 
 
+func (N *Node[T, V]) GetValue() *V {
+	return &N.value
+}
+
 type List[T comparable, V any] struct {
-	nodeMap map[T]*Node[T, V]
-	mostRecent *Node[T, V] //head
-	leastRecent *Node[T, V] //tail
+	MostRecent *Node[T, V] //head
+	LeastRecent *Node[T, V] //tail
 	capacity int
 	size int
 }
 
-func (l *List[T, V]) Add(key T, val V) {
-	//if the item is already present in the nodeMap, call update.
-	// if the item is new
-	//		if the capacity is not full, just add it to the head
-	//		if the capacity is full, Add it to the head, delete the tail in sequence
-	if l.capacity != l.size {
-		l.mostRecent.next = NewNode[T, V](key, val)
-		l.mostRecent = l.mostRecent.next
-		l.nodeMap[key] = l.mostRecent
-	} else {
-		//l.Delete()
-		l.mostRecent.next = NewNode[T, V](key, val)
-		l.mostRecent = l.mostRecent.next
-		l.nodeMap[key] = l.mostRecent
+func (l *List[T, V]) Insert(N *Node[T, V]) {
+	if l.capacity == 0 {
+		l.LeastRecent = N
+		l.MostRecent = N
+		l.capacity += 1
+		return
 	}
+
+	l.MostRecent.next = N
+	N.next = nil
+	N.prev = l.MostRecent
+	l.MostRecent = l.MostRecent.next
+	l.capacity += 1
+
+	if l.capacity > l.size {
+		l.LeastRecent = l.LeastRecent.next
+		l.LeastRecent.prev = nil
+		l.capacity -= 1
+	}
+	return
 }
 
-func (l *List[T, V]) Update(key T, val V) {
-	// find the node from nodeMap
-	// if the node has a left and right neighbor then connect the two
-	// if the node has a right node then set that node to the tail and set this node to the head
-	l.Delete(key)
-	l.Add(key, val)
+func (l *List[T, V]) Update(OldNode, NewNode *Node[T, V] ) {
+	l.Delete(OldNode)
+	l.Insert(NewNode)
 }
 
-func (l *List[T, V]) Delete(key T) {
-	// if left and right exist, connect the two
-	// if left exists, update head
-	// if right exists, update tail
-	N := l.nodeMap[key]
+func (l *List[T, V]) Max() bool {
+	return l.capacity == l.size
+}
+
+func (l *List[T, V]) Tail() T {
+	return l.LeastRecent.key
+}
+ 
+func (l *List[T, V]) Delete(N *Node[T,V]) {
 	if N.prev != nil && N.next != nil {
 		N.prev.next = N.next
 		N.next.prev = N.prev
 	}else if N.prev != nil {
-		N = N.prev
-		N.next = nil
-	}else{
-		N = N.next
-		N.prev = nil
+		l.MostRecent = N.prev
+		N.prev.next = nil
+	}else if N.next != nil {
+		l.LeastRecent = l.LeastRecent.next
+		l.LeastRecent.prev = nil
+	}else {
+		l.LeastRecent = nil
+		l.MostRecent = nil
 	}
-
-	delete(l.nodeMap, key)
+	l.capacity -= 1
 	return
 }	
 
-type Cache[K comparable, V any] struct {
-	c map[K]V
+type Cache[T comparable, V any] struct {
+	c map[T]*Node[T, V]
 	mu sync.Mutex
-	list *List[K, V]
+	list *List[T, V]
 }
 
-func NewCache[K comparable, V any](entryLimit int) Cache[K, V] {
-	return Cache[K, V]{
-		c: make(map[K]V),
+func NewCache[T comparable, V any](entryLimit int) Cache[T, V] {
+	return Cache[T, V]{
+		c: make(map[T]*Node[T, V]),
 		mu: sync.Mutex{},
-		list: &List[K, V]{
-			nodeMap: map[K]*Node[V]{},
-			capacity: entryLimit,
+		list: &List[T, V]{
+			capacity: 0,
 			size: entryLimit,
 		},
 	}
 }
 
-// Put adds the value to the cache, and returns a boolean to indicate whether a value already existed in the cache for that key.
-// If there was previously a value, it replaces that value with this one.
-// Any Put counts as a refresh in terms of LRU tracking.
-func (c *Cache[K, V]) Put(key K, value V) bool {
-	_, ok := c.c[key]
+func (c *Cache[T, V]) Put(key T, value V) bool {
+	N, ok := c.c[key]
 	if ok {
-		//update the node
+		M := NewNode[T, V](key, value)
+		c.c[key] = M
+		c.list.Update(N, M)
 		return true
 	}
-	c.c[key] = value
-	//add the node to the linked list
-	//pop out the tail node if the capacity is full 
+	N = NewNode[T, V](key, value)
+	c.c[key] = N
+	if c.list.Max() {
+		delete(c.c, c.list.Tail())
+	}
+	c.list.Insert(N)
 	return false
 }
 
-// Get returns the value assocated with the passed key, and a boolean to indicate whether a value was known or not. If not, nil is returned as the value.
-// Any Get counts as a refresh in terms of LRU tracking.
 func (c *Cache[K, V]) Get(key K) (*V, bool) {
-	v, ok := c.c[key]
+	N, ok := c.c[key]
 	if ok {
-		//update the node
-		return &v, ok
+		c.list.Update(N, N)
+		return N.GetValue(), ok
 	}
 	return nil, ok
 }
